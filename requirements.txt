@@ -1,0 +1,12 @@
+# Aplikasi LJK - daftar pustaka Python
+# Pasang manual (opsional): pip install -r requirements.txt
+# Peluncur run_app.bat / run_app.sh memasangnya otomatis.
+
+streamlit>=1.35        # antarmuka web (app.py)
+reportlab>=3.6         # membuat PDF LJK (ljk_generator.py)
+qrcode[pil]>=7.4       # QR code pada LJK (ljk_generator.py)
+pillow>=9.0            # gambar untuk QR code
+opencv-python>=4.8     # membaca foto LJK (omr_engine.py)
+numpy>=1.23            # operasi gambar
+pandas>=2.0            # tabel & laporan (app.py)
+openpyxl>=3.1          # impor/ekspor Excel .xlsx (database_manager.py)

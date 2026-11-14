@@ -1,8 +1,11 @@
-streamlit
-opencv-python-headless
-numpy
-pandas
-openpyxl
-reportlab
-Pillow
-pyzbar
+# Pemeriksa LJK - daftar pustaka Python (dipakai Streamlit Community Cloud & run_app.bat / run_app.sh)
+# PENTING untuk Cloud: pakai opencv-python-headless (BUKAN opencv-python), karena server tidak punya layar.
+
+streamlit>=1.40                  # antarmuka web (app.py); butuh >=1.40 untuk st.container(key=...)
+reportlab>=3.6                   # membuat PDF LJK (ljk_generator.py)
+qrcode[pil]>=7.4                 # QR code pada LJK (ljk_generator.py)
+pillow>=9.0                      # gambar untuk QR code
+opencv-python-headless>=4.8      # membaca foto LJK (omr_engine.py)
+numpy>=1.23                      # operasi gambar
+pandas>=2.0                      # tabel & laporan (app.py)
+openpyxl>=3.1                    # impor/ekspor Excel .xlsx (database_manager.py)

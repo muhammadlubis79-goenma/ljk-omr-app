@@ -14,7 +14,8 @@ Fungsi utama:
     export_grades_to_excel(quiz_id, output_path)
     save_scan_result(quiz_id, student_id, total_score, answers, image_path)
 
-Fungsi pendukung: create_quiz(), calculate_score(), set_db_path().
+Fungsi pendukung: create_quiz(), calculate_score(), set_db_path(), add_student(),
+    delete_scan_result(), delete_quiz(), backup_bytes(), restore_from_bytes().
 
 Dependensi: pip install openpyxl   (sqlite3, csv, json sudah bawaan Python)
 
@@ -40,9 +41,16 @@ from datetime import datetime
 # Lokasi file database. Default: ljk_data.db di folder yang sama dengan file ini
 # (jadi sama di mana pun script dijalankan). Bisa diganti lewat environment
 # variable LJK_DB_PATH atau fungsi set_db_path().
-DB_PATH = os.environ.get("LJK_DB_PATH") or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "ljk_data.db"
-)
+def _default_db_path():
+    """Folder aplikasi bila bisa ditulis; bila tidak (mis. hosting read-only), folder sementara."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.access(here, os.W_OK):
+        return os.path.join(here, "ljk_data.db")
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "ljk_data.db")
+
+
+DB_PATH = os.environ.get("LJK_DB_PATH") or _default_db_path()
 
 VALID_OPTIONS = "ABCDE"  # pilihan jawaban yang sah untuk kunci jawaban
 
@@ -597,6 +605,113 @@ def export_grades_to_excel(quiz_id, output_path):
             "tutup dulu lalu ulangi."
         ) from None
     return len(records)
+
+
+# --------------------------------------------------------------------------
+# Tambahan untuk aplikasi HP / cloud: siswa manual, hapus, cadangan
+# --------------------------------------------------------------------------
+def add_student(nis, full_name, class_name):
+    """Tambah satu siswa (atau perbarui nama/kelas bila NIS sudah ada).
+
+    Mengembalikan "baru" atau "diperbarui". Melempar ValueError bila ada isian kosong.
+    """
+    nis, full_name, class_name = _clean(nis), _clean(full_name), _clean(class_name)
+    if not nis or not full_name or not class_name:
+        raise ValueError("NIS, Nama, dan Kelas wajib diisi")
+    init_db()
+    with get_connection() as conn:
+        class_id = _get_or_create_class(conn, class_name)
+        row = conn.execute("SELECT id FROM students WHERE student_id = ?", (nis,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE students SET full_name = ?, class_id = ? WHERE id = ?",
+                (full_name, class_id, row["id"]),
+            )
+            return "diperbarui"
+        conn.execute(
+            "INSERT INTO students (student_id, full_name, class_id) VALUES (?, ?, ?)",
+            (nis, full_name, class_id),
+        )
+        return "baru"
+
+
+def delete_scan_result(scan_id):
+    """Hapus satu hasil scan (mis. 'batalkan simpan terakhir'). True bila ada yang terhapus."""
+    init_db()
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM scan_results WHERE id = ?", (int(scan_id),))
+        return cur.rowcount > 0
+
+
+def delete_quiz(quiz_id):
+    """Hapus kuis beserta seluruh hasil scan-nya. True bila kuis ada."""
+    init_db()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM scan_results WHERE quiz_id = ?", (int(quiz_id),))
+        cur = conn.execute("DELETE FROM quizzes WHERE id = ?", (int(quiz_id),))
+        return cur.rowcount > 0
+
+
+def backup_bytes():
+    """Seluruh database sebagai bytes (untuk diunduh sebagai cadangan)."""
+    import tempfile
+    init_db()
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        with open(tmp, "rb") as fh:
+            return fh.read()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def restore_from_bytes(data):
+    """Pulihkan database dari file cadangan. Isi database sekarang DIGANTI.
+
+    Cadangan divalidasi dulu (harus SQLite sah dengan semua tabel LJK); bila tidak sah
+    melempar ValueError dan database sekarang tidak berubah.
+    """
+    import tempfile
+    if not data or not bytes(data[:16]).startswith(b"SQLite format 3"):
+        raise ValueError("Berkas bukan cadangan database LJK yang sah")
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        src = sqlite3.connect(tmp)
+        try:
+            try:
+                names = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                ok = src.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            except sqlite3.DatabaseError:
+                raise ValueError("Berkas bukan cadangan database LJK yang sah") from None
+            need = {"classes", "students", "quizzes", "scan_results"}
+            if not ok or not need <= names:
+                raise ValueError("Cadangan rusak atau bukan dari aplikasi LJK")
+            init_db()
+            dst = sqlite3.connect(DB_PATH)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------

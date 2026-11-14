@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Pemeriksa LJK OMR - Streamlit, mobile-first (gaya ZipGrade), siap Streamlit Community Cloud.
-
-Menu bawah (bottom navigation):  🏠 Kuis  ·  📸 Scan  ·  👥 Siswa  ·  📊 Rekap
-
-Modul yang dipakai (harus satu folder dengan app.py):
-    ljk_generator.py    -> membuat PDF LJK
-    database_manager.py -> database SQLite + impor/ekspor Excel + cadangan
-    omr_engine.py       -> membaca foto LJK (OpenCV) dan menilainya
-
-Jalankan lokal :  streamlit run app.py
-Deploy         :  lihat PANDUAN_DEPLOY.md
-
-Kata sandi (opsional, disarankan untuk aplikasi publik): isi `APP_PASSWORD` di
-Settings > Secrets pada Streamlit Cloud, atau sebagai environment variable.
-"""
+"""Pemeriksa LJK OMR - Desain Simple & Kontras Tinggi (gaya ZipGrade)."""
 
 import base64
 import hashlib
@@ -40,7 +26,7 @@ import omr_engine as omr
 # Konstanta
 # --------------------------------------------------------------------------
 MIN_SOAL, MAX_SOAL = 1, 100
-CHOICES = list(dm.VALID_OPTIONS)  # A-E, sama dengan tata letak LJK
+CHOICES = list(dm.VALID_OPTIONS)
 
 MODE_100 = "Sama rata, skor maksimum 100"
 MODE_1 = "Sama rata, 1 poin per soal"
@@ -49,21 +35,21 @@ WEIGHT_MODES = [MODE_100, MODE_1, MODE_MANUAL]
 
 ALL_CLASSES = "(Semua kelas)"
 DEFAULT_FILL_THRESHOLD = 0.40
-LOW_RES_SIDE = 720          # sisi terpendek foto (px) di bawah ini = peringatan resolusi rendah
-MAX_IMAGE_SIDE = 3200       # foto lebih besar diperkecil agar hemat memori di server
+LOW_RES_SIDE = 720
+MAX_IMAGE_SIDE = 3200
 
-NAV_KUIS = "🏠 Kuis"
-NAV_SCAN = "📸 Scan"
-NAV_SISWA = "👥 Siswa"
-NAV_REKAP = "📊 Rekap"
+NAV_KUIS = "Kuis"
+NAV_SCAN = "Scan"
+NAV_SISWA = "Siswa"
+NAV_REKAP = "Rekap"
 NAV_ITEMS = [NAV_KUIS, NAV_SCAN, NAV_SISWA, NAV_REKAP]
 
-SRC_CAMERA = "📷 Kamera"
-SRC_UPLOAD = "📁 Unggah foto"
+SRC_CAMERA = "Kamera Langsung"
+SRC_UPLOAD = "Unggah / Kamera HP"
 
 
 # ==========================================================================
-# LAPISAN LOGIKA (tanpa tampilan streamlit, sehingga bisa diuji terpisah)
+# LAPISAN LOGIKA
 # ==========================================================================
 def _rows(sql, params=()):
     with dm.get_connection() as conn:
@@ -73,15 +59,6 @@ def _rows(sql, params=()):
 def _safe_name(text, fallback="x"):
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text)).strip("_")
     return cleaned or fallback
-
-
-def get_counts():
-    return _rows(
-        "SELECT (SELECT COUNT(*) FROM classes)      AS kelas,"
-        "       (SELECT COUNT(*) FROM students)     AS siswa,"
-        "       (SELECT COUNT(*) FROM quizzes)      AS kuis,"
-        "       (SELECT COUNT(*) FROM scan_results) AS scan"
-    )[0]
 
 
 def list_quizzes():
@@ -94,7 +71,6 @@ def list_quizzes():
 
 
 def get_quiz(quiz_id):
-    """Data kuis lengkap: kunci jawaban & bobot sebagai list (indeks 0 = soal 1)."""
     rows = _rows("SELECT * FROM quizzes WHERE id = ?", (quiz_id,))
     if not rows:
         raise ValueError(f"Kuis dengan id {quiz_id!r} tidak ditemukan")
@@ -133,13 +109,6 @@ def scanned_nis(quiz_id):
 
 
 def next_unscanned(order, scanned, after=None):
-    """NIS berikutnya (urutan daftar, memutar ke awal) yang belum di-scan.
-
-    order   : daftar NIS sesuai urutan tampil
-    scanned : himpunan NIS yang sudah punya nilai
-    after   : NIS yang baru saja disimpan (pencarian mulai sesudahnya); None = dari awal
-    Bila semua sudah di-scan: mengembalikan `after` (bila ada di daftar) atau NIS pertama.
-    """
     if not order:
         return None
     start = order.index(after) + 1 if after in order else 0
@@ -150,9 +119,7 @@ def next_unscanned(order, scanned, after=None):
     return after if after in order else order[0]
 
 
-# ---- kunci jawaban & bobot -------------------------------------------------
 def parse_key_string(text, n):
-    """'ABCDE...' (boleh ada spasi / koma / nomor) -> list huruf sepanjang n."""
     letters = [c for c in str(text or "").upper() if c.isalpha()]
     if not letters:
         raise ValueError("Isi dulu deretan huruf kunci jawaban.")
@@ -165,7 +132,6 @@ def parse_key_string(text, n):
 
 
 def build_weights(mode, n, manual_values=None):
-    """Bobot per soal sesuai mode. Melempar ValueError bila bobot manual tidak valid."""
     if mode == MODE_100:
         return [100.0 / n] * n
     if mode == MODE_1:
@@ -190,9 +156,7 @@ def build_weights(mode, n, manual_values=None):
     raise ValueError(f"Mode bobot tidak dikenal: {mode!r}")
 
 
-# ---- PDF LJK -----------------------------------------------------------------
 def make_pdf_bytes(quiz_name, total_questions, school, quiz_id, tanggal_iso):
-    """Buat PDF LJK; Quiz_ID pada QR code diisi id kuis dari database."""
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "ljk.pdf")
         gen.generate_ljk_pdf(
@@ -203,9 +167,7 @@ def make_pdf_bytes(quiz_name, total_questions, school, quiz_id, tanggal_iso):
             return fh.read()
 
 
-# ---- impor siswa ---------------------------------------------------------------
 def import_students_bytes(data, filename):
-    """Simpan unggahan ke file sementara lalu impor lewat database_manager."""
     ext = os.path.splitext(filename or "")[1].lower() or ".xlsx"
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "siswa" + ext)
@@ -215,7 +177,6 @@ def import_students_bytes(data, filename):
 
 
 def student_template_bytes():
-    """Template Excel kosong: NIS, Nama_Lengkap, Kelas (kolom NIS berformat teks)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
@@ -223,8 +184,8 @@ def student_template_bytes():
     ws = wb.active
     ws.title = "Siswa"
     ws.append(["NIS", "Nama_Lengkap", "Kelas"])
-    ws.append(["0001", "Contoh Siswa Satu", "X IPA 1"])
-    ws.append(["0002", "Contoh Siswa Dua", "X IPA 1"])
+    ws.append(["0001", "Contoh Siswa Satu", "8A"])
+    ws.append(["0002", "Contoh Siswa Dua", "8A"])
     for cell in ws[1]:
         cell.font = Font(bold=True)
     for row in ws.iter_rows(min_row=2, max_col=1):
@@ -237,19 +198,18 @@ def student_template_bytes():
     return buf.getvalue()
 
 
-# ---- scan & simpan ---------------------------------------------------------------
 def details_df(grade):
     rows = []
     for d in grade["details"]:
         ans = d["jawaban"]
         if ans is None:
-            status = "⚪ Kosong"
+            status = "Kosong"
         elif len(ans) > 1:
-            status = "⚠️ Ganda"
+            status = "Ganda"
         elif d["benar"]:
-            status = "✅ Benar"
+            status = "Benar"
         else:
-            status = "❌ Salah"
+            status = "Salah"
         rows.append({
             "No": d["nomor"],
             "Jawaban": ans or "-",
@@ -261,7 +221,6 @@ def details_df(grade):
 
 
 def run_scan(image_bytes, quiz, fill_threshold=DEFAULT_FILL_THRESHOLD, show_key=False):
-    """Periksa satu foto LJK terhadap kuis. Melempar omr.OMRError / ValueError bila gagal."""
     img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise omr.OMRError("File bukan gambar yang bisa dibaca. Gunakan foto JPG / PNG.")
@@ -270,9 +229,7 @@ def run_scan(image_bytes, quiz, fill_threshold=DEFAULT_FILL_THRESHOLD, show_key=
     notes = []
     if min(h, w) < LOW_RES_SIDE:
         notes.append(
-            f"Foto beresolusi rendah ({w}x{h}). Pembacaan bisa gagal atau kurang akurat. "
-            "Gunakan 📁 Unggah foto (kamera bawaan HP, resolusi penuh) atau dekatkan kertas "
-            "sampai memenuhi layar."
+            f"Foto beresolusi rendah ({w}x{h}). Gunakan 'Unggah / Kamera HP' agar memakai kamera bawaan."
         )
     big = max(h, w)
     if big > MAX_IMAGE_SIDE:
@@ -293,11 +250,11 @@ def run_scan(image_bytes, quiz, fill_threshold=DEFAULT_FILL_THRESHOLD, show_key=
     if meta:
         if str(meta.get("Quiz_ID")) != str(quiz["id"]):
             mismatch = (
-                f"QR pada LJK ini menunjuk kuis ID '{meta.get('Quiz_ID')}', sedangkan kuis yang "
-                f"dipilih ber-ID '{quiz['id']}'. Kemungkinan LJK berasal dari kuis lain."
+                f"QR pada LJK menunjuk kuis ID '{meta.get('Quiz_ID')}', sedangkan kuis aktif "
+                f"ber-ID '{quiz['id']}'."
             )
     else:
-        notes.append("QR code tidak terbaca, jadi kecocokan LJK dengan kuis tidak bisa diperiksa.")
+        notes.append("QR code tidak terbaca, kecocokan kuis tidak diperiksa.")
 
     return {
         "answers": res["student_answers"],
@@ -324,10 +281,6 @@ def jpeg_bytes(img_bgr, quality=85):
 
 
 def save_scan(scan, quiz, nis, photo_bytes, photo_name="foto.jpg", scans_dir=None):
-    """Simpan foto asli + gambar koreksi (JPG kecil) ke disk lalu hasilnya ke database.
-
-    Mengembalikan id scan.
-    """
     if scans_dir is None:
         scans_dir = os.path.join(os.path.dirname(os.path.abspath(dm.DB_PATH)), "scans")
     folder = os.path.join(scans_dir, f"kuis_{quiz['id']}")
@@ -363,7 +316,6 @@ def save_scan(scan, quiz, nis, photo_bytes, photo_name="foto.jpg", scans_dir=Non
 
 
 def undo_scan(scan_id):
-    """Batalkan satu hasil scan: hapus baris database dan file fotonya. True bila ada."""
     rows = _rows("SELECT image_path FROM scan_results WHERE id = ?", (int(scan_id),))
     if not rows:
         return False
@@ -379,7 +331,6 @@ def undo_scan(scan_id):
     return ok
 
 
-# ---- laporan -----------------------------------------------------------------------
 def _latest_rows(quiz_id):
     return _rows(
         """
@@ -402,7 +353,6 @@ RESULT_COLUMNS = ["NIS", "Nama", "Kelas", "Total Skor", "Benar", "Salah", "Perse
 
 
 def results_df(quiz_id):
-    """Nilai terbaru tiap siswa (kolom sama dengan ekspor Excel + waktu scan)."""
     quiz = get_quiz(quiz_id)
     n, keys, max_score = quiz["total_questions"], quiz["key"], quiz["max_score"]
     records = []
@@ -425,7 +375,6 @@ def score_stats(df, kkm):
         "median": round(float(p.median()), 2),
         "maks": round(float(p.max()), 2),
         "min": round(float(p.min()), 2),
-        "std": round(float(p.std(ddof=0)), 2),
         "lulus": int((p >= kkm).sum()),
     }
 
@@ -450,7 +399,6 @@ def class_summary(df):
 
 
 def item_analysis(quiz_id):
-    """Tingkat keberhasilan per soal dari scan terbaru tiap siswa."""
     quiz = get_quiz(quiz_id)
     rows = _latest_rows(quiz_id)
     n = quiz["total_questions"]
@@ -474,7 +422,6 @@ def item_analysis(quiz_id):
 
 
 def export_bytes(quiz_id, fmt="xlsx"):
-    """Ekspor nilai lewat database_manager. Mengembalikan (bytes, jumlah_baris)."""
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, f"nilai.{fmt}")
         rows = dm.export_grades_to_excel(quiz_id, path)
@@ -483,7 +430,6 @@ def export_bytes(quiz_id, fmt="xlsx"):
 
 
 def check_password(entered, expected):
-    """Bandingkan kata sandi dengan waktu konstan."""
     return hmac.compare_digest(
         hashlib.sha256(str(entered).encode("utf-8")).digest(),
         hashlib.sha256(str(expected).encode("utf-8")).digest(),
@@ -491,20 +437,18 @@ def check_password(entered, expected):
 
 
 def configured_password():
-    """Kata sandi aplikasi dari Streamlit secrets / environment variable (None = tanpa sandi)."""
     value = None
     try:
         value = st.secrets.get("APP_PASSWORD")
-    except Exception:  # tidak ada file secrets
+    except Exception:
         value = None
     value = value or os.environ.get("APP_PASSWORD")
     return str(value) if value else None
 
 
 def app_icon_png_b64(size=192):
-    """Ikon aplikasi sederhana (PNG, base64) untuk 'Tambahkan ke Layar Utama'."""
     img = np.zeros((size, size, 3), np.uint8)
-    img[:] = (235, 99, 37)  # BGR dari #2563eb
+    img[:] = (50, 125, 46)
     c = size // 2
     cv2.circle(img, (c, c), int(size * 0.30), (255, 255, 255), max(4, size // 24), cv2.LINE_AA)
     cv2.circle(img, (c, c), int(size * 0.13), (255, 255, 255), -1, cv2.LINE_AA)
@@ -513,91 +457,201 @@ def app_icon_png_b64(size=192):
 
 
 # ==========================================================================
-# TAMPILAN: CSS, komponen kecil
+# TAMPILAN: CSS SIMPLE GAYA ZIPGRADE & ANTI-DARK-MODE CONFLICT
 # ==========================================================================
 CSS = """
 <style>
 :root{
-  --brand:#2563eb; --brand-dark:#1d4ed8; --ok:#16a34a; --bad:#dc2626; --warn:#d97706;
-  --bg:#f3f5f9; --card:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0;
+  --brand:#2e7d32; --brand-dark:#1b5e20; --brand-soft:#e8f5e9;
+  --ok:#15803d; --bad:#b91c1c; --warn:#b45309;
+  --bg:#f4f6f4; --card:#ffffff; --ink:#111827; --muted:#4b5563; --line:#d1d5db;
+  --text-color:#111827; --background-color:#f4f6f4; --secondary-background-color:#ffffff;
 }
-html, body, [data-testid="stApp"], [data-testid="stAppViewContainer"]{ background:var(--bg); }
+
+/* Paksa tema terang & teks gelap agar HP Mode Gelap tidak membuat tulisan putih di atas putih */
+html, body, [data-testid="stApp"], [data-testid="stAppViewContainer"], [data-testid="stMain"]{
+  background-color:var(--bg) !important;
+  color:var(--ink) !important;
+  color-scheme:light !important;
+}
 header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"],
 [data-testid="stStatusWidget"], .stAppDeployButton, #MainMenu, footer{ display:none !important; }
 
-/* Lebar seperti layar HP, ruang bawah untuk bottom navbar */
-.block-container{ max-width:560px !important; padding:.9rem .9rem 7.5rem !important; }
-h1{ font-size:1.55rem !important; margin:.2rem 0 .6rem !important; }
-h2, h3{ font-size:1.15rem !important; }
+/* Kontainer utama rapat & bersih */
+.block-container{
+  max-width:540px !important;
+  padding:0 0.85rem 5.5rem !important;
+}
 
-/* ===== Kartu ===== */
+/* Pastikan semua label, judul, paragraf, dan caption terbaca jelas */
+h1, h2, h3, p, span, label, summary,
+div[data-testid="stMarkdownContainer"] p,
+[data-testid="stWidgetLabel"] p,
+[data-testid="stCaptionContainer"] p,
+[data-testid="stExpander"] summary p{
+  color:var(--ink) !important;
+}
+[data-testid="stCaptionContainer"] p{
+  color:var(--muted) !important;
+  font-size:0.85rem !important;
+}
+
+/* Top Bar Hijau Flat ala ZipGrade */
+.topbar{
+  background:var(--brand-dark);
+  color:#ffffff !important;
+  margin:0 -0.85rem 0.85rem;
+  padding:14px 16px;
+  font-size:1.05rem;
+  font-weight:800;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+}
+
+/* Kartu & Daftar Datar */
 div[data-testid="stVerticalBlockBorderWrapper"]{
-  background:var(--card); border:1px solid var(--line) !important; border-radius:18px !important;
-  box-shadow:0 2px 10px rgba(15,23,42,.05); padding:.35rem .25rem;
+  background:var(--card) !important;
+  border:1px solid var(--line) !important;
+  border-radius:8px !important;
+  box-shadow:none !important;
+  padding:0.5rem 0.65rem !important;
+  margin-bottom:0.5rem !important;
 }
-.hero{ background:linear-gradient(135deg,var(--brand),#38bdf8); color:#fff; border-radius:20px;
-  padding:16px 18px; margin-bottom:12px; }
-.hero .t{ font-size:1.25rem; font-weight:800; } .hero .s{ opacity:.9; font-size:.9rem; margin-top:2px; }
-.mgrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:8px; margin:6px 0 12px; }
-.mcell{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:10px 6px; text-align:center; }
-.mcell .v{ font-size:1.35rem; font-weight:800; color:var(--ink); line-height:1.1; }
-.mcell .l{ font-size:.72rem; color:var(--muted); margin-top:3px; }
-.mcell.ok .v{ color:var(--ok);} .mcell.bad .v{ color:var(--bad);} .mcell.warn .v{ color:var(--warn);}
-.score{ text-align:center; padding:6px 0 2px; }
-.score .big{ font-size:2.6rem; font-weight:900; color:var(--brand); line-height:1; }
-.score .sub{ color:var(--muted); font-size:.95rem; margin-top:4px; }
-.who{ font-weight:700; font-size:1.05rem; } .meta{ color:var(--muted); font-size:.85rem; }
-.pill{ display:inline-block; padding:2px 10px; border-radius:999px; font-size:.78rem; font-weight:700;
-  background:#e0e7ff; color:#3730a3; }
-.pill.ok{ background:#dcfce7; color:#166534; } .pill.bad{ background:#fee2e2; color:#991b1b; }
 
-/* ===== Tombol besar (touch-friendly) ===== */
+/* Input & Dropdown terang dengan teks hitam tajam */
+input, textarea,
+[data-baseweb="input"], [data-baseweb="input"] input,
+[data-baseweb="textarea"], [data-baseweb="textarea"] textarea,
+[data-baseweb="select"] > div{
+  background-color:#ffffff !important;
+  color:#111827 !important;
+  -webkit-text-fill-color:#111827 !important;
+  border-color:#cbd5e1 !important;
+  border-radius:6px !important;
+  font-size:16px !important;
+}
+input::placeholder, textarea::placeholder{
+  color:#6b7280 !important;
+  -webkit-text-fill-color:#6b7280 !important;
+}
+[data-testid="stNumberInput"] button{
+  background-color:#f3f4f6 !important;
+  color:#111827 !important;
+}
+[data-testid="stExpander"]{
+  background-color:#ffffff !important;
+  border:1px solid var(--line) !important;
+  border-radius:8px !important;
+}
+
+/* Grid Angka Ringkas */
+.mgrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:6px; margin:6px 0 10px; }
+.mcell{ background:#ffffff; border:1px solid var(--line); border-radius:6px; padding:8px 4px; text-align:center; }
+.mcell .v{ font-size:1.25rem; font-weight:800; color:var(--ink); line-height:1.15; }
+.mcell .l{ font-size:0.72rem; color:var(--muted); margin-top:2px; }
+.mcell.ok .v{ color:var(--ok); } .mcell.bad .v{ color:var(--bad); } .mcell.warn .v{ color:var(--warn); }
+
+.score{ text-align:center; padding:4px 0; }
+.score .big{ font-size:2.4rem; font-weight:900; color:var(--brand-dark); line-height:1; }
+.score .sub{ color:var(--muted); font-size:0.9rem; margin-top:4px; }
+
+.qrow{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+.who{ font-weight:700; font-size:0.98rem; color:var(--ink); }
+.meta{ color:var(--muted); font-size:0.82rem; margin-top:2px; }
+.qright{ text-align:right; white-space:nowrap; font-size:0.82rem; color:var(--muted); }
+.pill{ display:inline-block; padding:1px 7px; border-radius:4px; font-size:0.72rem; font-weight:700;
+  background:var(--brand-soft); color:var(--brand-dark); margin-left:4px; }
+
+/* Tombol Flat & Tegas */
 .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] > button{
-  width:100%; min-height:3.4rem; border-radius:16px; font-weight:700; font-size:1.05rem;
-  border:1px solid var(--line); transition:transform .05s;
+  width:100%;
+  min-height:2.85rem;
+  border-radius:6px !important;
+  font-weight:700 !important;
+  font-size:0.95rem !important;
+  background-color:#ffffff !important;
+  color:#111827 !important;
+  border:1px solid #cbd5e1 !important;
+  box-shadow:none !important;
 }
-.stButton > button:active, .stDownloadButton > button:active{ transform:scale(.98); }
 .stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"]{
-  background:var(--brand); border-color:var(--brand); color:#fff; box-shadow:0 4px 12px rgba(37,99,235,.3);
+  background-color:var(--brand) !important;
+  border-color:var(--brand) !important;
+  color:#ffffff !important;
 }
-.stButton > button[kind="primary"]:hover{ background:var(--brand-dark); border-color:var(--brand-dark); color:#fff; }
+.stButton > button[kind="primary"] p, .stDownloadButton > button[kind="primary"] p{
+  color:#ffffff !important;
+}
+.stButton > button[kind="primary"]:hover{
+  background-color:var(--brand-dark) !important;
+  border-color:var(--brand-dark) !important;
+}
 
-/* ===== Input besar, font 16px (tidak memicu zoom iOS) ===== */
-input, textarea, [data-baseweb="select"] > div{ font-size:16px !important; }
-[data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"]{ border-radius:12px !important; }
-[data-testid="stNumberInput"] input{ min-height:2.9rem; }
-label p{ font-weight:600; }
-
-/* ===== Kamera: selebar layar, tombol jepret besar di bawah ===== */
-[data-testid="stCameraInput"]{ width:calc(100% + 1.8rem); margin-left:-.9rem; margin-right:-.9rem; }
+/* Kamera */
+[data-testid="stCameraInput"]{ width:100%; }
 [data-testid="stCameraInput"] video, [data-testid="stCameraInput"] img{
-  width:100% !important; height:auto !important; border-radius:0; display:block; }
-[data-testid="stCameraInput"] > div{ width:100%; }
+  width:100% !important; height:auto !important; border-radius:6px; display:block;
+}
 [data-testid="stCameraInputButton"]{
-  width:calc(100% - 1.8rem) !important; margin:10px .9rem 4px !important; min-height:4.4rem !important;
-  border-radius:22px !important; font-size:1.25rem !important; font-weight:800 !important;
-  background:var(--brand) !important; color:#fff !important; border:0 !important;
-  box-shadow:0 6px 18px rgba(37,99,235,.38) !important;
+  width:100% !important; margin:8px 0 2px !important; min-height:3.6rem !important;
+  border-radius:8px !important; font-size:1.05rem !important; font-weight:800 !important;
+  background:var(--brand) !important; color:#ffffff !important; border:0 !important;
 }
-[data-testid="stImage"] img{ width:100% !important; border-radius:12px; }
+[data-testid="stImage"] img{ width:100% !important; border-radius:6px; }
 
-/* ===== Bottom Navigation Bar ===== */
+/* Bottom Navigation Bar: Bersih tanpa bulatan radio & tidak terpotong di ujung kanan */
 .st-key-bottom_nav{
-  position:fixed; left:50%; bottom:0; transform:translateX(-50%); width:min(100%,560px); z-index:1000;
-  background:rgba(255,255,255,.97); backdrop-filter:blur(10px); border-top:1px solid var(--line);
-  padding:6px 8px calc(6px + env(safe-area-inset-bottom)); box-shadow:0 -6px 20px rgba(15,23,42,.08);
+  position:fixed; left:50%; bottom:0; transform:translateX(-50%);
+  width:min(100%,540px); z-index:1000;
+  background:#ffffff !important;
+  border-top:1px solid var(--line);
+  padding:4px 48px calc(4px + env(safe-area-inset-bottom)) 6px;
 }
-.st-key-bottom_nav [role="radiogroup"]{ display:flex; gap:4px; width:100%; }
+.st-key-bottom_nav [role="radiogroup"]{
+  display:flex !important;
+  flex-direction:row !important;
+  flex-wrap:nowrap !important;
+  gap:4px !important;
+  width:100% !important;
+}
 .st-key-bottom_nav label{
-  flex:1 1 0; margin:0 !important; padding:10px 2px !important; border-radius:14px; cursor:pointer;
-  justify-content:center; text-align:center; min-height:3.2rem; align-items:center;
+  flex:1 1 0 !important;
+  min-width:0 !important;
+  margin:0 !important;
+  padding:10px 4px !important;
+  border-radius:6px !important;
+  cursor:pointer;
+  display:flex !important;
+  justify-content:center !important;
+  align-items:center !important;
+  text-align:center !important;
+  min-height:2.75rem !important;
+  background:transparent !important;
 }
-.st-key-bottom_nav label > div:first-child{ display:none !important; }
+/* Sembunyikan bulatan radio hitam pada semua versi Streamlit */
+.st-key-bottom_nav label > div:first-of-type,
+.st-key-bottom_nav label input[type="radio"]{
+  display:none !important;
+  width:0 !important;
+  height:0 !important;
+  margin:0 !important;
+  padding:0 !important;
+}
 .st-key-bottom_nav label div[data-testid="stMarkdownContainer"] p{
-  font-size:.86rem; font-weight:700; white-space:nowrap; margin:0; color:var(--muted); }
-.st-key-bottom_nav label:has(input:checked){ background:var(--brand); }
-.st-key-bottom_nav label:has(input:checked) p{ color:#fff !important; }
-.st-key-bottom_nav [data-testid="stWidgetLabel"]{ display:none; }
+  font-size:0.88rem !important;
+  font-weight:700 !important;
+  white-space:nowrap !important;
+  margin:0 !important;
+  color:var(--muted) !important;
+}
+.st-key-bottom_nav label:has(input:checked){
+  background:var(--brand-soft) !important;
+  border-bottom:3px solid var(--brand-dark) !important;
+}
+.st-key-bottom_nav label:has(input:checked) p{
+  color:var(--brand-dark) !important;
+}
+.st-key-bottom_nav [data-testid="stWidgetLabel"]{ display:none !important; }
 </style>
 """
 
@@ -607,11 +661,6 @@ def inject_css():
 
 
 def inject_pwa():
-    """Meta tag & manifest agar 'Tambahkan ke Layar Utama' tampil seperti aplikasi.
-
-    Streamlit Cloud tidak mengizinkan service worker / manifest di root, jadi ini upaya
-    terbaik: tanpa mode offline, tetapi bisa dibuka layar penuh dari ikon di layar utama.
-    """
     try:
         import streamlit.components.v1 as components
 
@@ -626,21 +675,19 @@ try {
     m.setAttribute('content', content);
   };
   meta('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
-  meta('theme-color', '#2563eb');
+  meta('theme-color', '#1b5e20');
   meta('mobile-web-app-capable', 'yes');
   meta('apple-mobile-web-app-capable', 'yes');
   meta('apple-mobile-web-app-title', 'LJK');
-  meta('apple-mobile-web-app-status-bar-style', 'default');
   const icon = __ICON__;
-  const link = (rel, href, extra) => {
+  const link = (rel, href) => {
     let l = h.querySelector('link[rel="' + rel + '"]');
     if (!l) { l = d.createElement('link'); l.setAttribute('rel', rel); h.appendChild(l); }
     l.setAttribute('href', href);
-    if (extra) for (const k in extra) l.setAttribute(k, extra[k]);
   };
   link('apple-touch-icon', icon);
   const manifest = {name: 'Pemeriksa LJK', short_name: 'LJK', display: 'standalone',
-    background_color: '#f3f5f9', theme_color: '#2563eb',
+    background_color: '#f4f6f4', theme_color: '#1b5e20',
     start_url: window.parent.location.pathname || '/',
     icons: [{src: icon, sizes: '192x192', type: 'image/png'}]};
   link('manifest', 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest)));
@@ -649,15 +696,18 @@ try {
 """.replace("__ICON__", json.dumps(icon))
         components.html(script, height=0)
     except Exception:
-        pass  # PWA hanyalah pemanis; aplikasi tetap jalan tanpa ini
+        pass
 
 
 def esc(text):
     return html.escape(str(text))
 
 
+def topbar(title):
+    st.markdown(f'<div class="topbar">{esc(title)}</div>', unsafe_allow_html=True)
+
+
 def metric_grid(items):
-    """Deretan angka ringkas. items: [(label, nilai, kelas_css_opsional), ...]"""
     cells = "".join(
         f'<div class="mcell {c[2] if len(c) > 2 else ""}"><div class="v">{esc(c[1])}</div>'
         f'<div class="l">{esc(c[0])}</div></div>'
@@ -667,7 +717,6 @@ def metric_grid(items):
 
 
 def flash(level, text):
-    """Pesan yang tetap tampil setelah st.rerun()."""
     st.session_state["flash"] = (level, text)
 
 
@@ -680,7 +729,6 @@ def show_flash():
 
 
 def goto(page, quiz_id=None):
-    """Callback tombol: pindah menu (boleh menetapkan kuis aktif). Aman mengubah state widget."""
     st.session_state["nav"] = page
     if quiz_id is not None:
         st.session_state["active_quiz"] = quiz_id
@@ -693,170 +741,186 @@ def cached_pdf(quiz_name, total_questions, school, quiz_id, tanggal_iso):
 
 
 def quiz_label(q):
-    return f"{q['name']} · {q['total_questions']} soal"
+    return f"{q['name']} ({q['total_questions']} soal)"
 
 
 # ==========================================================================
-# HALAMAN 🏠 KUIS
+# HALAMAN KUIS (Simple ala ZipGrade)
 # ==========================================================================
 def page_kuis():
-    # Form dikosongkan SETELAH simpan (di awal run berikutnya, sebelum widget dibuat).
     if st.session_state.pop("reset_form", False):
         st.session_state["new_name"] = ""
         st.session_state["quick_key"] = ""
         st.session_state["w_mode"] = MODE_100
+        st.session_state["show_new_quiz"] = False
 
-    counts = get_counts()
-    st.markdown(
-        '<div class="hero"><div class="t">Pemeriksa LJK</div>'
-        '<div class="s">Buat kuis → cetak LJK → scan dengan HP → rekap nilai</div></div>',
-        unsafe_allow_html=True,
-    )
-    metric_grid([("Kuis", counts["kuis"]), ("Siswa", counts["siswa"]),
-                 ("LJK ter-scan", counts["scan"])])
+    topbar("Kuis")
     show_flash()
 
-    # ---- Kuis baru ----
-    with st.container(border=True):
-        st.subheader("➕ Kuis baru")
-        name = st.text_input("Nama kuis", key="new_name", placeholder="mis. Kuis Matematika Bab 3")
-        n = int(st.number_input("Jumlah soal", min_value=MIN_SOAL, max_value=MAX_SOAL,
-                                value=30, step=1, key="new_n",
-                                help="Boleh berapa pun dari 1 sampai 100 (mis. 35 atau 50)."))
-        quick = st.text_area(
-            "⚡ Isi Cepat Kunci Jawaban",
-            key="quick_key", height=110,
-            placeholder="Tempel sekali, mis.  ABCDEABCDE…  atau  1.A 2.B 3.C …",
-            help="Huruf A-E saja; spasi, koma, baris baru, dan nomor diabaikan.",
-        )
-        letters = [c for c in quick.upper() if c.isalpha()]
-        invalid = sorted({c for c in letters if c not in CHOICES})
-        if not letters:
-            st.caption(f"Belum ada kunci. Butuh {n} huruf (A-E).")
-        elif invalid:
-            st.markdown(f":red[Huruf tidak valid: {esc(', '.join(invalid))}. Gunakan A-E saja.]")
-        elif len(letters) == n:
-            st.markdown(f":green[✔ {n} dari {n} huruf. Kunci lengkap.]")
-        else:
-            st.markdown(f":orange[⚠ {len(letters)} dari {n} huruf.]")
-        if letters and not invalid:
-            preview = "  ".join(f"{i}{c}" for i, c in enumerate(letters[:MAX_SOAL], start=1))
-            st.caption(preview)
-
-        with st.expander("⚖️ Bobot nilai"):
-            mode = st.radio("Mode bobot", WEIGHT_MODES, key="w_mode")
-            manual_values = None
-            if mode == MODE_MANUAL:
-                w_df = pd.DataFrame({"No": list(range(1, n + 1)), "Bobot": [1.0] * n})
-                w_edit = st.data_editor(
-                    w_df, key=f"w_editor_{n}", hide_index=True, disabled=["No"],
-                    num_rows="fixed", height=320,
-                    column_config={"Bobot": st.column_config.NumberColumn(
-                        "Bobot", min_value=0.0, step=0.5, format="%.2f")},
-                )
-                manual_values = [None if pd.isna(v) else float(v) for v in w_edit["Bobot"]]
-            try:
-                weights = build_weights(mode, n, manual_values)
-            except ValueError as exc:
-                weights = None
-                st.error(str(exc))
-            else:
-                st.caption(f"Skor maksimum kuis: **{sum(weights):g}**")
-
-        if st.button("💾 Simpan kuis", type="primary", key="save_quiz"):
-            problems = []
-            if not (name or "").strip():
-                problems.append("Nama kuis wajib diisi.")
-            keys = None
-            try:
-                keys = parse_key_string(quick, n)
-            except ValueError as exc:
-                problems.append(str(exc))
-            if weights is None:
-                problems.append("Bobot nilai belum valid.")
-            if problems:
-                for msg in problems:
-                    st.error(msg)
-            else:
-                qid = dm.create_quiz(name.strip(), n, keys, weights)
-                st.session_state["active_quiz"] = qid
-                st.session_state["reset_form"] = True
-                flash("success", f"Kuis '{name.strip()}' tersimpan. Unduh LJK-nya di daftar bawah, "
-                                 "lalu tekan 📸 Scan untuk mulai memeriksa.")
-                st.rerun()
-
-    # ---- Daftar kuis ----
-    quizzes = list_quizzes()
-    st.subheader("Daftar kuis")
-    if not quizzes:
-        st.info("Belum ada kuis. Buat kuis pertama di atas.")
-    with st.expander("🖨️ Opsi cetak LJK", expanded=False):
-        st.text_input("Nama sekolah (tercetak di LJK)", key="school_name", value="Nama Sekolah")
-    school = st.session_state.get("school_name") or "Nama Sekolah"
-
-    for q in quizzes:
+    # Tombol buka/tutup form Kuis Baru (agar halaman utama tetap bersih seperti ZipGrade)
+    is_creating = st.session_state.get("show_new_quiz", False)
+    if not is_creating:
+        if st.button("+ Kuis Baru", type="primary", key="open_new_quiz"):
+            st.session_state["show_new_quiz"] = True
+            st.rerun()
+    else:
         with st.container(border=True):
-            active = st.session_state.get("active_quiz") == q["id"]
-            st.markdown(
-                f'<div class="who">{esc(q["name"])} {"<span class=pill>aktif</span>" if active else ""}</div>'
-                f'<div class="meta">{q["total_questions"]} soal · {q["peserta"]} siswa ter-scan · ID {q["id"]}</div>',
-                unsafe_allow_html=True,
+            st.subheader("Buat Kuis Baru")
+            name = st.text_input("Nama kuis", key="new_name", placeholder="mis. Informatika SAS Ganjil")
+            n = int(st.number_input("Jumlah soal", min_value=MIN_SOAL, max_value=MAX_SOAL,
+                                    value=30, step=1, key="new_n"))
+            quick = st.text_area(
+                "Kunci Jawaban",
+                key="quick_key", height=95,
+                placeholder="Ketik/tempel huruf A-E, mis. ABCDEABCDE...",
             )
-            st.button("📸 Mulai scan kuis ini", key=f"scan_{q['id']}", type="primary",
-                      on_click=goto, args=(NAV_SCAN, q["id"]))
-            if st.session_state.get("pdf_for") == q["id"]:
-                pdf = cached_pdf(q["name"], q["total_questions"], school, q["id"],
-                                 date.today().isoformat())
-                st.download_button("⬇️ Unduh PDF LJK", pdf,
-                                   file_name=f"LJK_{_safe_name(q['name'])}_{q['total_questions']}soal.pdf",
-                                   mime="application/pdf", key=f"dl_pdf_{q['id']}")
+            letters = [c for c in quick.upper() if c.isalpha()]
+            invalid = sorted({c for c in letters if c not in CHOICES})
+            if not letters:
+                st.caption(f"Butuh {n} huruf (A-E).")
+            elif invalid:
+                st.error(f"Huruf tidak valid: {', '.join(invalid)}. Gunakan A-E saja.")
+            elif len(letters) == n:
+                st.success(f"Kunci lengkap ({n}/{n} soal).")
             else:
-                if st.button("🖨️ Siapkan PDF LJK", key=f"mk_pdf_{q['id']}"):
-                    st.session_state["pdf_for"] = q["id"]
-                    st.rerun()
-            if st.session_state.get("del_quiz") == q["id"]:
-                st.warning("Hapus kuis ini beserta SEMUA nilainya? Tidak bisa dibatalkan.")
-                if st.button("Ya, hapus", key=f"del_yes_{q['id']}", type="primary"):
-                    dm.delete_quiz(q["id"])
-                    for k in ("del_quiz", "pdf_for"):
-                        st.session_state.pop(k, None)
-                    if st.session_state.get("active_quiz") == q["id"]:
-                        st.session_state.pop("active_quiz", None)
-                    flash("success", f"Kuis '{q['name']}' dihapus.")
-                    st.rerun()
-                if st.button("Batal", key=f"del_no_{q['id']}"):
-                    st.session_state.pop("del_quiz", None)
-                    st.rerun()
-            else:
-                if st.button("🗑️ Hapus kuis", key=f"del_{q['id']}"):
-                    st.session_state["del_quiz"] = q["id"]
+                st.warning(f"Terisi {len(letters)} dari {n} soal.")
+
+            with st.expander("Atur bobot nilai (opsional)"):
+                mode = st.radio("Mode bobot", WEIGHT_MODES, key="w_mode")
+                manual_values = None
+                if mode == MODE_MANUAL:
+                    w_df = pd.DataFrame({"No": list(range(1, n + 1)), "Bobot": [1.0] * n})
+                    w_edit = st.data_editor(
+                        w_df, key=f"w_editor_{n}", hide_index=True, disabled=["No"],
+                        num_rows="fixed", height=280,
+                        column_config={"Bobot": st.column_config.NumberColumn(
+                            "Bobot", min_value=0.0, step=0.5, format="%.2f")},
+                    )
+                    manual_values = [None if pd.isna(v) else float(v) for v in w_edit["Bobot"]]
+                try:
+                    weights = build_weights(mode, n, manual_values)
+                except ValueError as exc:
+                    weights = None
+                    st.error(str(exc))
+                else:
+                    st.caption(f"Skor maksimum: {sum(weights):g}")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Simpan Kuis", type="primary", key="save_quiz"):
+                    problems = []
+                    if not (name or "").strip():
+                        problems.append("Nama kuis wajib diisi.")
+                    keys = None
+                    try:
+                        keys = parse_key_string(quick, n)
+                    except ValueError as exc:
+                        problems.append(str(exc))
+                    if weights is None:
+                        problems.append("Bobot nilai belum valid.")
+                    if problems:
+                        for msg in problems:
+                            st.error(msg)
+                    else:
+                        qid = dm.create_quiz(name.strip(), n, keys, weights)
+                        st.session_state["active_quiz"] = qid
+                        st.session_state["reset_form"] = True
+                        flash("success", f"Kuis '{name.strip()}' berhasil dibuat.")
+                        st.rerun()
+            with c2:
+                if st.button("Batal", key="cancel_new_quiz"):
+                    st.session_state["show_new_quiz"] = False
                     st.rerun()
 
-    # ---- Cadangan ----
-    with st.expander("💾 Cadangan & pulihkan data"):
-        st.caption(
-            "Di Streamlit Cloud, data bisa hilang saat aplikasi restart atau tidur. "
-            "Unduh cadangan secara rutin (mis. setiap selesai scan) dan pulihkan bila perlu."
-        )
-        st.download_button("⬇️ Unduh cadangan data", dm.backup_bytes(),
+    # Baris Sortir & Cari ala ZipGrade
+    quizzes = list_quizzes()
+    if not quizzes:
+        st.info("Belum ada kuis. Tekan tombol '+ Kuis Baru' di atas untuk memulai.")
+    else:
+        col_sort, col_search = st.columns([1, 1.4])
+        with col_sort:
+            sort_by = st.selectbox("Sortir", ["Terbaru", "Nama A-Z"], key="quiz_sort")
+        with col_search:
+            search_q = st.text_input("Cari", key="quiz_search", placeholder="Cari nama kuis...")
+
+        filtered = [
+            q for q in quizzes
+            if not search_q.strip() or search_q.strip().lower() in q["name"].lower()
+        ]
+        if sort_by == "Nama A-Z":
+            filtered.sort(key=lambda item: item["name"].lower())
+
+        school = st.session_state.get("school_name") or "Nama Sekolah"
+        for q in filtered:
+            with st.container(border=True):
+                active = st.session_state.get("active_quiz") == q["id"]
+                badge = '<span class="pill">Aktif</span>' if active else ""
+                st.markdown(
+                    f'<div class="qrow">'
+                    f'  <div><div class="who">{esc(q["name"])}{badge}</div>'
+                    f'  <div class="meta">{q["total_questions"]} soal · ID {q["id"]}</div></div>'
+                    f'  <div class="qright">Kertas: <b>{q["peserta"]}</b></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                b1, b2, b3 = st.columns([1.4, 1.2, 0.7])
+                with b1:
+                    st.button("Scan", key=f"scan_{q['id']}", type="primary",
+                              on_click=goto, args=(NAV_SCAN, q["id"]))
+                with b2:
+                    if st.session_state.get("pdf_for") == q["id"]:
+                        pdf = cached_pdf(q["name"], q["total_questions"], school, q["id"],
+                                         date.today().isoformat())
+                        st.download_button("Unduh PDF", pdf,
+                                           file_name=f"LJK_{_safe_name(q['name'])}.pdf",
+                                           mime="application/pdf", key=f"dl_pdf_{q['id']}")
+                    else:
+                        if st.button("Cetak LJK", key=f"mk_pdf_{q['id']}"):
+                            st.session_state["pdf_for"] = q["id"]
+                            st.rerun()
+                with b3:
+                    if st.button("Hapus", key=f"del_{q['id']}"):
+                        st.session_state["del_quiz"] = q["id"]
+                        st.rerun()
+
+                if st.session_state.get("del_quiz") == q["id"]:
+                    st.warning("Hapus kuis ini beserta semua nilainya?")
+                    dy, dn = st.columns(2)
+                    with dy:
+                        if st.button("Ya, Hapus", key=f"del_yes_{q['id']}", type="primary"):
+                            dm.delete_quiz(q["id"])
+                            st.session_state.pop("del_quiz", None)
+                            st.session_state.pop("pdf_for", None)
+                            if st.session_state.get("active_quiz") == q["id"]:
+                                st.session_state.pop("active_quiz", None)
+                            flash("success", f"Kuis '{q['name']}' dihapus.")
+                            st.rerun()
+                    with dn:
+                        if st.button("Batal", key=f"del_no_{q['id']}"):
+                            st.session_state.pop("del_quiz", None)
+                            st.rerun()
+
+    # Pengaturan Tambahan di Bawah
+    with st.expander("Pengaturan LJK & Cadangan Data"):
+        st.text_input("Nama sekolah (tercetak di header LJK)", key="school_name", value="Nama Sekolah")
+        st.download_button("Unduh Cadangan Database (.db)", dm.backup_bytes(),
                            file_name=f"cadangan_ljk_{datetime.now():%Y%m%d_%H%M}.db",
                            mime="application/octet-stream", key="dl_backup")
         up = st.file_uploader("Pulihkan dari cadangan (.db)", type=["db", "sqlite"], key="restore_up")
-        agree = st.checkbox("Saya mengerti: data sekarang akan DIGANTI oleh cadangan ini",
-                            key="restore_ok")
-        if st.button("♻️ Pulihkan data", key="restore_btn", disabled=not (up and agree)):
+        agree = st.checkbox("Ganti data sekarang dengan file cadangan", key="restore_ok")
+        if st.button("Pulihkan Data", key="restore_btn", disabled=not (up and agree)):
             try:
                 dm.restore_from_bytes(up.getvalue())
             except ValueError as exc:
                 st.error(str(exc))
             else:
                 st.session_state.pop("active_quiz", None)
-                flash("success", "Data berhasil dipulihkan dari cadangan.")
+                flash("success", "Data berhasil dipulihkan.")
                 st.rerun()
 
 
 # ==========================================================================
-# HALAMAN 📸 SCAN
+# HALAMAN SCAN
 # ==========================================================================
 def _cb_bump_camera():
     st.session_state["cam_ver"] = st.session_state.get("cam_ver", 0) + 1
@@ -870,79 +934,69 @@ def _cb_undo(scan_id, nis):
 
 
 def page_scan():
+    topbar("Scan LJK")
     show_flash()
     quizzes = list_quizzes()
     if not quizzes:
-        st.info("Belum ada kuis. Buat kuis dulu di menu 🏠 Kuis.")
-        st.button("🏠 Ke menu Kuis", key="to_kuis", type="primary", on_click=goto, args=(NAV_KUIS,))
+        st.info("Belum ada kuis. Buat kuis dulu di menu Kuis.")
+        st.button("Ke Menu Kuis", key="to_kuis", type="primary", on_click=goto, args=(NAV_KUIS,))
         return
+
     ids = [q["id"] for q in quizzes]
     labels = {q["id"]: quiz_label(q) for q in quizzes}
     if st.session_state.get("scan_quiz") not in ids:
         act = st.session_state.get("active_quiz")
         st.session_state["scan_quiz"] = act if act in ids else ids[0]
-    qid = st.selectbox("Kuis", ids, key="scan_quiz", format_func=lambda i: labels[i])
+    qid = st.selectbox("Pilih Kuis", ids, key="scan_quiz", format_func=lambda i: labels[i])
     st.session_state["active_quiz"] = qid
     quiz = get_quiz(qid)
 
     students = list_students()
     if students.empty:
-        st.warning("Belum ada data siswa. Impor daftar siswa dulu agar nilai bisa disimpan.")
-        st.button("👥 Ke menu Siswa", key="to_siswa", type="primary", on_click=goto, args=(NAV_SISWA,))
+        st.warning("Belum ada data siswa. Tambahkan siswa dulu di menu Siswa.")
+        st.button("Ke Menu Siswa", key="to_siswa", type="primary", on_click=goto, args=(NAV_SISWA,))
         return
 
     classes = sorted(students["Kelas"].unique(), key=str.lower)
     if len(classes) > 1:
         if st.session_state.get("scan_kelas") not in [ALL_CLASSES] + classes:
             st.session_state["scan_kelas"] = ALL_CLASSES
-        kelas = st.selectbox("Kelas", [ALL_CLASSES] + classes, key="scan_kelas")
+        kelas = st.selectbox("Filter Kelas", [ALL_CLASSES] + classes, key="scan_kelas")
         subset = students if kelas == ALL_CLASSES else students[students["Kelas"] == kelas]
     else:
         subset = students
+
     order = list(subset["NIS"])
     info = {r.NIS: (r.Nama, r.Kelas) for r in students.itertuples(index=False)}
     scanned = scanned_nis(qid)
 
-    # Lompat ke siswa berikutnya yang belum di-scan (sebelum widget siswa dibuat)
     advance = st.session_state.pop("advance_after", None)
     if advance is not None or st.session_state.get("scan_stu") not in order:
         st.session_state["scan_stu"] = next_unscanned(order, scanned, advance)
 
     def stu_label(nis):
         nama, kls = info[nis]
-        return f"{'✅ ' if nis in scanned else ''}{nama} · {kls}"
+        status = "[Sudah] " if nis in scanned else ""
+        return f"{status}{nama} ({kls})"
 
-    nis = st.selectbox("Siswa", order, key="scan_stu", format_func=stu_label)
+    nis = st.selectbox("Pilih Siswa", order, key="scan_stu", format_func=stu_label)
     nama, kls = info[nis]
     done = len(scanned & set(order))
-    st.caption(f"Sudah di-scan: {done} dari {len(order)} siswa" +
-               (" · semua selesai 🎉" if done == len(order) else ""))
-    if nis in scanned:
-        st.markdown(":orange[Siswa ini sudah punya nilai. Menyimpan lagi akan menggantinya "
-                    "sebagai nilai terbaru.]")
+    st.caption(f"Progres: {done} dari {len(order)} siswa sudah di-scan.")
 
-    with st.expander("⚙️ Opsi scan"):
-        auto_save = st.checkbox("Simpan otomatis begitu LJK terbaca", key="auto_save",
-                                help="Tanpa menekan tombol simpan; langsung lanjut ke siswa berikutnya. "
-                                     "Hasil terakhir tetap tampil dan bisa dibatalkan.")
-        threshold = st.slider("Sensitivitas arsiran (batas isi bulatan)", 0.20, 0.70,
-                              DEFAULT_FILL_THRESHOLD, 0.05, key="fill_thr",
-                              help="Naikkan bila bulatan kosong terbaca terisi; turunkan bila "
-                                   "arsiran tipis tidak terbaca.")
-        show_key = st.checkbox("Tampilkan kunci benar pada soal yang salah (lingkaran hijau tipis)",
-                               key="show_key")
+    with st.expander("Opsi Scan"):
+        auto_save = st.checkbox("Simpan otomatis setelah terbaca", key="auto_save")
+        threshold = st.slider("Sensitivitas arsiran", 0.20, 0.70, DEFAULT_FILL_THRESHOLD, 0.05, key="fill_thr")
+        show_key = st.checkbox("Tampilkan kunci benar pada soal salah", key="show_key")
 
-    src = st.radio("Sumber foto", [SRC_CAMERA, SRC_UPLOAD], key="scan_src", horizontal=True,
-                   label_visibility="collapsed")
+    src = st.radio("Metode Foto", [SRC_UPLOAD, SRC_CAMERA], key="scan_src", horizontal=True)
     ver = st.session_state.setdefault("cam_ver", 0)
     if src == SRC_CAMERA:
         photo = st.camera_input("Jepret LJK", key=f"cam_{ver}", label_visibility="collapsed")
-        st.caption("Pegang HP tegak, pastikan 4 kotak hitam sudut terlihat utuh. Resolusi kamera "
-                   "browser cukup rendah; untuk hasil paling akurat pakai 📁 Unggah foto.")
     else:
-        photo = st.file_uploader("Ambil / pilih foto LJK", type=["jpg", "jpeg", "png"],
+        photo = st.file_uploader("Ambil / Pilih Foto LJK", type=["jpg", "jpeg", "png"],
                                  key=f"up_{ver}", label_visibility="collapsed")
-        st.caption("Di HP, tombol ini bisa membuka kamera bawaan dengan resolusi penuh.")
+        st.caption("Disarankan: tombol ini membuka kamera asli HP beresolusi tinggi.")
 
     if photo is not None:
         data = photo.getvalue()
@@ -961,7 +1015,7 @@ def _render_scan_result(quiz, nis, nama, kls, data, photo_name, threshold, show_
         scan, error = cache["scan"], cache["error"]
     else:
         scan, error = None, None
-        with st.spinner("Memeriksa LJK…"):
+        with st.spinner("Memeriksa LJK..."):
             try:
                 scan = run_scan(data, quiz, threshold, show_key)
             except (omr.OMRError, ValueError) as exc:
@@ -971,9 +1025,7 @@ def _render_scan_result(quiz, nis, nama, kls, data, photo_name, threshold, show_
     if error:
         with st.container(border=True):
             st.error(error)
-            st.caption("Tips: cahaya merata tanpa bayangan, kertas rata, seluruh kertas dan 4 kotak "
-                       "hitam sudut terlihat, jumlah soal kuis sama dengan LJK.")
-            st.button("🔁 Foto ulang", key="retry_err", type="primary", on_click=_cb_bump_camera)
+            st.button("Foto Ulang", key="retry_err", type="primary", on_click=_cb_bump_camera)
         return
 
     grade = scan["grade"]
@@ -982,7 +1034,7 @@ def _render_scan_result(quiz, nis, nama, kls, data, photo_name, threshold, show_
                     unsafe_allow_html=True)
         st.markdown(
             f'<div class="score"><div class="big">{grade["total_score"]:g}</div>'
-            f'<div class="sub">dari {grade["max_score"]:g} · {grade["persentase"]:g}%</div></div>',
+            f'<div class="sub">dari {grade["max_score"]:g} ({grade["persentase"]:g}%)</div></div>',
             unsafe_allow_html=True,
         )
         salah_murni = max(grade["salah"] - grade["kosong"] - grade["ganda"], 0)
@@ -991,16 +1043,19 @@ def _render_scan_result(quiz, nis, nama, kls, data, photo_name, threshold, show_
         if scan["mismatch"]:
             st.warning(scan["mismatch"])
         for note in scan["notes"]:
-            st.markdown(f":orange[⚠ {esc(note)}]")
+            st.warning(note)
         st.image(cv2.cvtColor(resize_to_width(scan["feedback_bgr"], 1000), cv2.COLOR_BGR2RGB),
                  caption="Hijau = benar · Merah = salah")
-        with st.expander("Detail jawaban per soal"):
+        with st.expander("Rincian per nomor soal"):
             st.dataframe(details_df(grade), hide_index=True)
 
         blocked = bool(scan["mismatch"])
-        if st.button("✅ Simpan & lanjut ke siswa berikutnya", key="save_next", type="primary"):
-            _do_save(scan, quiz, nis, nama, kls, data, photo_name)
-        st.button("🔁 Foto ulang (jangan simpan)", key="retry_ok", on_click=_cb_bump_camera)
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Simpan Nilai", key="save_next", type="primary"):
+                _do_save(scan, quiz, nis, nama, kls, data, photo_name)
+        with c2:
+            st.button("Foto Ulang", key="retry_ok", on_click=_cb_bump_camera)
 
     if auto_save and not blocked and st.session_state.get("auto_done") != sig:
         st.session_state["auto_done"] = sig
@@ -1010,7 +1065,7 @@ def _render_scan_result(quiz, nis, nama, kls, data, photo_name, threshold, show_
 def _do_save(scan, quiz, nis, nama, kls, data, photo_name):
     try:
         sid = save_scan(scan, quiz, nis, data, photo_name)
-    except Exception as exc:  # noqa: BLE001 - tampilkan apa pun penyebabnya ke pengguna
+    except Exception as exc:
         st.error(f"Gagal menyimpan: {exc}")
         return
     grade = scan["grade"]
@@ -1022,7 +1077,7 @@ def _do_save(scan, quiz, nis, nama, kls, data, photo_name):
     st.session_state["advance_after"] = nis
     st.session_state["cam_ver"] = st.session_state.get("cam_ver", 0) + 1
     st.session_state.pop("scan_cache", None)
-    flash("success", f"✅ {nama}: {grade['total_score']:g}/{grade['max_score']:g} tersimpan.")
+    flash("success", f"Tersimpan: {nama} ({grade['total_score']:g}/{grade['max_score']:g})")
     st.rerun()
 
 
@@ -1033,51 +1088,44 @@ def _render_last_saved(last):
             f'{last["skor"]:g}/{last["maks"]:g} ({last["persen"]:g}%)</div>',
             unsafe_allow_html=True,
         )
-        if last.get("thumb"):
-            st.image(last["thumb"])
-        st.button("↩️ Batalkan simpan ini", key="undo_last", on_click=_cb_undo,
+        st.button("Batalkan Simpan Terakhir", key="undo_last", on_click=_cb_undo,
                   args=(last["id"], last["nis"]))
 
 
 # ==========================================================================
-# HALAMAN 👥 SISWA
+# HALAMAN SISWA
 # ==========================================================================
 def page_siswa():
-    # Isian dikosongkan SETELAH simpan, di awal run berikutnya (sebelum widget dibuat).
     if st.session_state.pop("reset_add", False):
         st.session_state["add_nis"] = ""
         st.session_state["add_nama"] = ""
+    topbar("Data Siswa")
     show_flash()
-    st.title("👥 Data Siswa")
     students = list_students()
-    metric_grid([("Siswa", len(students)), ("Kelas", students["Kelas"].nunique() if len(students) else 0)])
+    metric_grid([("Total Siswa", len(students)), ("Jumlah Kelas", students["Kelas"].nunique() if len(students) else 0)])
 
-    with st.container(border=True):
-        st.subheader("📥 Impor dari Excel")
-        st.caption("Kolom: NIS, Nama_Lengkap, Kelas (.xlsx atau .csv). NIS yang sudah ada akan diperbarui.")
-        st.download_button("⬇️ Unduh template Excel", student_template_bytes(),
+    with st.expander("Impor Siswa dari Excel / CSV"):
+        st.caption("Format kolom wajib: NIS, Nama_Lengkap, Kelas")
+        st.download_button("Unduh Template Excel", student_template_bytes(),
                            file_name="template_siswa.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                            key="dl_tpl")
         up = st.file_uploader("Pilih file siswa", type=["xlsx", "csv"], key="stu_up")
-        if st.button("📥 Impor sekarang", key="stu_import", type="primary", disabled=up is None):
+        if st.button("Impor Sekarang", key="stu_import", type="primary", disabled=up is None):
             try:
                 res = import_students_bytes(up.getvalue(), up.name)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 st.error(f"Gagal impor: {exc}")
             else:
                 msg = f"Baru: {res['inserted']} · Diperbarui: {res['updated']} · Dilewati: {res['skipped']}"
-                if res.get("errors"):
-                    msg += "\n\n" + "\n".join(f"- {e}" for e in res["errors"][:10])
                 flash("success" if not res.get("errors") else "warning", msg)
                 st.rerun()
 
-    with st.container(border=True):
-        st.subheader("➕ Tambah satu siswa")
+    with st.expander("Tambah Satu Siswa Manual"):
         c_nis = st.text_input("NIS", key="add_nis")
         c_nama = st.text_input("Nama lengkap", key="add_nama")
-        c_kelas = st.text_input("Kelas", key="add_kelas", placeholder="mis. X IPA 1")
-        if st.button("Simpan siswa", key="add_btn"):
+        c_kelas = st.text_input("Kelas", key="add_kelas", placeholder="mis. 8A")
+        if st.button("Simpan Siswa", key="add_btn", type="primary"):
             try:
                 status = dm.add_student(c_nis, c_nama, c_kelas)
             except ValueError as exc:
@@ -1087,22 +1135,21 @@ def page_siswa():
                 flash("success", f"Siswa {c_nama.strip()} ({status}).")
                 st.rerun()
 
-    st.subheader("Daftar siswa")
     if students.empty:
-        st.info("Belum ada siswa.")
+        st.info("Belum ada data siswa.")
         return
     classes = [ALL_CLASSES] + sorted(students["Kelas"].unique(), key=str.lower)
-    kelas = st.selectbox("Tampilkan kelas", classes, key="stu_filter")
+    kelas = st.selectbox("Filter Kelas", classes, key="stu_filter")
     view = students if kelas == ALL_CLASSES else students[students["Kelas"] == kelas]
-    st.dataframe(view, hide_index=True)
+    st.dataframe(view, hide_index=True, use_container_width=True)
 
 
 # ==========================================================================
-# HALAMAN 📊 REKAP
+# HALAMAN REKAP
 # ==========================================================================
 def page_rekap():
+    topbar("Rekap Nilai")
     show_flash()
-    st.title("📊 Rekap Nilai")
     quizzes = list_quizzes()
     if not quizzes:
         st.info("Belum ada kuis.")
@@ -1112,59 +1159,53 @@ def page_rekap():
     if st.session_state.get("rekap_quiz") not in ids:
         act = st.session_state.get("active_quiz")
         st.session_state["rekap_quiz"] = act if act in ids else ids[0]
-    qid = st.selectbox("Kuis", ids, key="rekap_quiz", format_func=lambda i: labels[i])
+    qid = st.selectbox("Pilih Kuis", ids, key="rekap_quiz", format_func=lambda i: labels[i])
     df = results_df(qid)
     if df.empty:
-        st.info("Belum ada LJK yang disimpan untuk kuis ini.")
-        st.button("📸 Mulai scan", key="rekap_to_scan", type="primary", on_click=goto, args=(NAV_SCAN, qid))
+        st.info("Belum ada LJK yang di-scan untuk kuis ini.")
+        st.button("Mulai Scan", key="rekap_to_scan", type="primary", on_click=goto, args=(NAV_SCAN, qid))
         return
 
-    kkm = st.number_input("KKM (persen)", min_value=0, max_value=100, value=70, step=5, key="kkm")
-    kelas_opts = [ALL_CLASSES] + sorted(df["Kelas"].unique(), key=str.lower)
-    kelas = st.selectbox("Kelas", kelas_opts, key="rekap_kelas") if len(kelas_opts) > 2 else ALL_CLASSES
+    c1, c2 = st.columns(2)
+    with c1:
+        kkm = st.number_input("KKM (%)", min_value=0, max_value=100, value=70, step=5, key="kkm")
+    with c2:
+        kelas_opts = [ALL_CLASSES] + sorted(df["Kelas"].unique(), key=str.lower)
+        kelas = st.selectbox("Kelas", kelas_opts, key="rekap_kelas")
+
     view = df if kelas == ALL_CLASSES else df[df["Kelas"] == kelas]
     s = score_stats(view, kkm)
     metric_grid([("Peserta", s["peserta"]), ("Rata-rata", s["rata"]),
                  ("Tertinggi", s["maks"], "ok"), ("Terendah", s["min"], "bad"),
-                 (f"Lulus (≥{kkm})", s["lulus"], "ok"), ("Belum lulus", s["peserta"] - s["lulus"], "warn")])
+                 (f"Lulus (>={kkm})", s["lulus"], "ok")])
 
-    st.dataframe(view.drop(columns=["Waktu Scan"]), hide_index=True)
+    st.dataframe(view.drop(columns=["Waktu Scan"]), hide_index=True, use_container_width=True)
 
-    data, rows = export_bytes(qid, "xlsx")
-    st.download_button("⬇️ Ekspor nilai ke Excel", data,
+    data, _ = export_bytes(qid, "xlsx")
+    st.download_button("Unduh Nilai Excel (.xlsx)", data,
                        file_name=f"nilai_{_safe_name(labels[qid])}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        key="dl_xlsx", type="primary")
-    csv_bytes, _ = export_bytes(qid, "csv")
-    st.download_button("⬇️ Ekspor CSV", csv_bytes, file_name=f"nilai_{_safe_name(labels[qid])}.csv",
-                       mime="text/csv", key="dl_csv")
 
-    with st.expander("📈 Sebaran nilai"):
-        st.bar_chart(score_distribution(view))
-    if len(kelas_opts) > 2:
-        with st.expander("🏫 Ringkasan per kelas"):
-            st.dataframe(class_summary(df), hide_index=True)
-    with st.expander("🔎 Analisis butir soal"):
-        st.dataframe(item_analysis(qid), hide_index=True)
-    with st.expander("⏳ Siswa belum di-scan"):
+    with st.expander("Analisis Butir Soal"):
+        st.dataframe(item_analysis(qid), hide_index=True, use_container_width=True)
+    with st.expander("Siswa Belum Di-scan"):
         students = list_students()
         pending = students[~students["NIS"].isin(scanned_nis(qid))]
         if pending.empty:
             st.success("Semua siswa sudah di-scan.")
         else:
-            st.dataframe(pending, hide_index=True)
+            st.dataframe(pending, hide_index=True, use_container_width=True)
 
 
 # ==========================================================================
 # MAIN
 # ==========================================================================
 def login_gate():
-    """True bila boleh lanjut. Bila APP_PASSWORD diset, minta kata sandi dulu."""
     expected = configured_password()
     if not expected or st.session_state.get("authed"):
         return True
-    st.markdown('<div class="hero"><div class="t">🔒 Pemeriksa LJK</div>'
-                '<div class="s">Masukkan kata sandi untuk melanjutkan</div></div>', unsafe_allow_html=True)
+    topbar("Masuk Aplikasi LJK")
     with st.container(border=True):
         pw = st.text_input("Kata sandi", type="password", key="pw_input")
         if st.button("Masuk", type="primary", key="pw_btn"):
@@ -1180,7 +1221,7 @@ PAGES = {NAV_KUIS: page_kuis, NAV_SCAN: page_scan, NAV_SISWA: page_siswa, NAV_RE
 
 
 def main():
-    st.set_page_config(page_title="Pemeriksa LJK", page_icon="📝", layout="centered",
+    st.set_page_config(page_title="Pemeriksa LJK", page_icon="LJK", layout="centered",
                        initial_sidebar_state="collapsed")
     inject_css()
     inject_pwa()
